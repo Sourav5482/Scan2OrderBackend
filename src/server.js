@@ -11,8 +11,11 @@ dotenv.config()
 const app = express()
 const PORT = process.env.PORT || 5000
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://scan2-order.vercel.app'
+const normalizeOrigin = (origin) => String(origin || '').trim().replace(/\/$/, '')
+
 const ALLOWED_ORIGINS = new Set([
-  FRONTEND_URL,
+  normalizeOrigin(FRONTEND_URL),
+  'https://scan2-order.vercel.app',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:8081',
@@ -30,7 +33,9 @@ const isLocalDevOrigin = (origin) => {
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || ALLOWED_ORIGINS.has(origin) || isLocalDevOrigin(origin)) {
+    const normalizedOrigin = normalizeOrigin(origin)
+
+    if (!origin || ALLOWED_ORIGINS.has(normalizedOrigin) || isLocalDevOrigin(origin)) {
       callback(null, true)
       return
     }
