@@ -31,11 +31,20 @@ const isLocalDevOrigin = (origin) => {
   }
 }
 
+const isVercelOrigin = (origin) => {
+  try {
+    const parsed = new URL(origin)
+    return parsed.protocol === 'https:' && parsed.hostname.endsWith('.vercel.app')
+  } catch {
+    return false
+  }
+}
+
 app.use(cors({
   origin(origin, callback) {
     const normalizedOrigin = normalizeOrigin(origin)
 
-    if (!origin || ALLOWED_ORIGINS.has(normalizedOrigin) || isLocalDevOrigin(origin)) {
+    if (!origin || ALLOWED_ORIGINS.has(normalizedOrigin) || isLocalDevOrigin(origin) || isVercelOrigin(origin)) {
       callback(null, true)
       return
     }
