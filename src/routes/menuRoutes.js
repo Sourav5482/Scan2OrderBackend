@@ -1,9 +1,158 @@
 import express from 'express'
+import multer from 'multer'
+import csv from 'csv-parser'
+import { Readable } from 'stream'
 import { requireAuth, requireRestaurantAccess } from '../middleware/authMiddleware.js'
 import Menu from '../models/Menu.js'
 import { hasRequiredFields, isValidObjectId } from '../utils/validators.js'
 
 const router = express.Router()
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024,
+  },
+})
+
+const parseCsvBuffer = async (buffer) => {
+  return await new Promise((resolve, reject) => {
+    const rows = []
+
+    Readable
+      .from([buffer])
+      .pipe(csv())
+      .on('data', (row) => rows.push(row))
+      .on('end', () => resolve(rows))
+      .on('error', reject)
+  })
+}
+
+router.post('/bulk-upload', requireAuth, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({
+        success: false,
+        message: 'CSV file is required. Upload with form field name "file".',
+      })
+    }
+
+    if (!String(req.file.mimetype || '').includes('csv') && !String(req.file.originalname || '').toLowerCase().endsWith('.csv')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Only CSV files are allowed',
+      })
+    }
+
+    const parsedRows = await parseCsvBuffer(req.file.buffer)
+
+    if (!parsedRows.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'CSV is empty. Add at least one menu row.',
+      })
+    }
+
+    const restaurantId = String(req.auth?.restaurantId || '').trim()
+
+    if (!restaurantId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized restaurant context',
+      })
+    }
+
+    const validItems = []
+    const invalidRows = []
+
+    parsedRows.forEach((row, index) => {
+      const rowNumber = index + 2
+      const name = String(row.name || '').trim()
+      const category = String(row.category || '').trim()
+      const rawImage = String(row.img || row.image || row.imagePath || row.image_path || '').trim()
+      const price = Number(row.price)
+
+      const rowErrors = []
+
+      if (!name) {
+        rowErrors.push('name is required')
+      }
+
+      if (!category) {
+        rowErrors.push('category is required')
+      }
+
+      if (!Number.isFinite(price) || price < 0) {
+        rowErrors.push('price must be a valid positive number')
+      }
+
+      if (!rawImage) {
+        rowErrors.push('img/image/imagePath is required')
+      }
+
+      if (rowErrors.length) {
+        invalidRows.push({
+          row: rowNumber,
+          errors: rowErrors,
+        })
+        return
+      }
+
+      validItems.push({
+        restaurantId,
+        name,
+        category,
+        price,
+        image: rawImage,
+      })
+    })
+
+    if (!validItems.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid rows found in CSV',
+        data: {
+          totalRows: parsedRows.length,
+          insertedCount: 0,
+          invalidCount: invalidRows.length,
+          invalidRows,
+        },
+      })
+    }
+
+    if (invalidRows.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'CSV contains invalid rows. Fix and re-upload.',
+        data: {
+          totalRows: parsedRows.length,
+          insertedCount: 0,
+          invalidCount: invalidRows.length,
+          invalidRows,
+        },
+      })
+    }
+
+    const insertedItems = await Menu.insertMany(validItems, { ordered: false })
+
+    return res.status(201).json({
+      success: true,
+      message: `Bulk upload completed. Inserted ${insertedItems.length} menu item(s).`,
+      data: {
+        totalRows: parsedRows.length,
+        insertedCount: insertedItems.length,
+        invalidCount: invalidRows.length,
+        invalidRows,
+      },
+    })
+  } catch (error) {
+    console.error('[MENU] Failed to bulk upload CSV:', error.message)
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to bulk upload menu CSV',
+      error: error.message,
+    })
+  }
+})
 
 router.post('/', requireAuth, requireRestaurantAccess('body', 'restaurantId'), async (req, res) => {
   try {
