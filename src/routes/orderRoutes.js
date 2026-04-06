@@ -222,7 +222,7 @@ router.get('/details/:orderId', async (req, res) => {
 
     const order = await Order.findOne(
       { orderId: orderId.trim() },
-      { orderId: 1, status: 1, items: 1, total: 1 },
+      { orderId: 1, status: 1, completed: 1, items: 1, total: 1 },
     )
 
     if (!order) {
@@ -238,6 +238,7 @@ router.get('/details/:orderId', async (req, res) => {
       data: {
         orderId: order.orderId,
         status: order.status,
+        completed: order.completed,
         items: order.items,
         total: order.total,
       },
@@ -282,6 +283,11 @@ router.put('/:id', requireAuth, async (req, res) => {
 
     if (hasCompleted) {
       updatePayload.completed = completed
+
+      // Keep status aligned with completion when client toggles completion only.
+      if (completed === true && !hasStatus) {
+        updatePayload.status = 'Done'
+      }
     }
 
     const updatedOrder = await Order.findOneAndUpdate(
